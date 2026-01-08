@@ -212,3 +212,178 @@ func TestDeleteGame_Unit(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }
+
+// TestSearchGames_Unit 検索機能のユニットテスト
+func TestSearchGames_Unit(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	// テストデータの準備
+	games := []models.Game{
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC"},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC"},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch"},
+	}
+	for i := range games {
+		db.Create(&games[i])
+	}
+
+	router := gin.New()
+	router.GET("/games/search", func(c *gin.Context) {
+		SearchGames(c, db)
+	})
+
+	t.Run("タイトル部分一致検索", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games/search?q=Final", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+	})
+
+	t.Run("大文字・小文字を区別しない", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games/search?q=final", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+	})
+
+	t.Run("検索結果が0件", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games/search?q=Nonexistent", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 0)
+	})
+}
+
+// TestGetGamesWithFilters_Unit フィルタリング機能のユニットテスト
+func TestGetGamesWithFilters_Unit(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	series := "Final Fantasy"
+	genre := "RPG"
+
+	// テストデータの準備
+	games := []models.Game{
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC", Series: &series, Genre: &genre},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC", Series: &series, Genre: &genre},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch"},
+	}
+	for i := range games {
+		db.Create(&games[i])
+	}
+
+	router := gin.New()
+	router.GET("/games", func(c *gin.Context) {
+		GetGames(c, db)
+	})
+
+	t.Run("プラットフォームフィルタ", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games?platform=PC", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		for _, game := range result {
+			assert.Equal(t, "PC", game.Platform)
+		}
+	})
+
+	t.Run("発売会社フィルタ", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games?publisher=Square+Enix", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		for _, game := range result {
+			assert.Equal(t, "Square Enix", game.Publisher)
+		}
+	})
+
+	t.Run("ジャンルフィルタ", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games?genre=RPG", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		for _, game := range result {
+			assert.NotNil(t, game.Genre)
+			assert.Equal(t, "RPG", *game.Genre)
+		}
+	})
+
+	t.Run("発売年範囲フィルタ", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games?min_year=2017&max_year=2020", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		for _, game := range result {
+			assert.GreaterOrEqual(t, game.ReleaseYear, 2017)
+			assert.LessOrEqual(t, game.ReleaseYear, 2020)
+		}
+	})
+
+	t.Run("複数条件の組み合わせ", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/games?platform=PC&publisher=Square+Enix", nil)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var result []models.Game
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		for _, game := range result {
+			assert.Equal(t, "PC", game.Platform)
+			assert.Equal(t, "Square Enix", game.Publisher)
+		}
+	})
+}

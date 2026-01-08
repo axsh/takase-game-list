@@ -36,6 +36,9 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 	router.DELETE("/games/:id", func(c *gin.Context) {
 		handlers.DeleteGame(c, db)
 	})
+	router.GET("/games/search", func(c *gin.Context) {
+		handlers.SearchGames(c, db)
+	})
 
 	return router
 }

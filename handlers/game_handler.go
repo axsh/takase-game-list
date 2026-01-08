@@ -38,8 +38,25 @@ func GetGames(c *gin.Context, db *gorm.DB) {
 	var games []models.Game
 	query := db.Model(&models.Game{})
 
-	// フィルタリング（フェーズ3で実装予定）
-	// 現時点では全件取得
+	// フィルタリング
+	if platform := c.Query("platform"); platform != "" {
+		query = query.Where("platform = ?", platform)
+	}
+	if publisher := c.Query("publisher"); publisher != "" {
+		query = query.Where("publisher = ?", publisher)
+	}
+	if genre := c.Query("genre"); genre != "" {
+		query = query.Where("genre = ?", genre)
+	}
+	if series := c.Query("series"); series != "" {
+		query = query.Where("series = ?", series)
+	}
+	if minYear := c.Query("min_year"); minYear != "" {
+		query = query.Where("release_year >= ?", minYear)
+	}
+	if maxYear := c.Query("max_year"); maxYear != "" {
+		query = query.Where("release_year <= ?", maxYear)
+	}
 
 	// ソート
 	sort := c.DefaultQuery("sort", "created_at")
@@ -53,6 +70,36 @@ func GetGames(c *gin.Context, db *gorm.DB) {
 
 	if err := query.Find(&games).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get games"})
+		return
+	}
+
+	c.JSON(http.StatusOK, games)
+}
+
+// SearchGames ゲーム検索ハンドラー
+func SearchGames(c *gin.Context, db *gorm.DB) {
+	var games []models.Game
+	query := db.Model(&models.Game{})
+
+	// 検索キーワード
+	keyword := c.Query("q")
+	if keyword != "" {
+		// タイトル部分一致検索（大文字・小文字を区別しない）
+		query = query.Where("LOWER(title) LIKE LOWER(?)", "%"+keyword+"%")
+	}
+
+	// ソート（デフォルト: 登録日時降順）
+	sort := c.DefaultQuery("sort", "created_at")
+	order := c.DefaultQuery("order", "desc")
+
+	if order == "asc" {
+		query = query.Order(sort + " ASC")
+	} else {
+		query = query.Order(sort + " DESC")
+	}
+
+	if err := query.Find(&games).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search games"})
 		return
 	}
 
