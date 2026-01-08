@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"takase-game-list/db"
+	"takase-game-list/handlers"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -13,12 +14,29 @@ import (
 func setupRouter(db *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	
+	// ヘルスチェック
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 			"db":     dbOK(db),
 		})
 	})
+
+	// ゲームAPI
+	router.POST("/games", func(c *gin.Context) {
+		handlers.CreateGame(c, db)
+	})
+	router.GET("/games", func(c *gin.Context) {
+		handlers.GetGames(c, db)
+	})
+	router.PUT("/games/:id", func(c *gin.Context) {
+		handlers.UpdateGame(c, db)
+	})
+	router.DELETE("/games/:id", func(c *gin.Context) {
+		handlers.DeleteGame(c, db)
+	})
+
 	return router
 }
 
