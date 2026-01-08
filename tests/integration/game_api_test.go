@@ -32,6 +32,9 @@ func setupTestServer(t *testing.T, database *gorm.DB) *gin.Engine {
 	router.GET("/games/search", func(c *gin.Context) {
 		handlers.SearchGames(c, database)
 	})
+	router.GET("/games/statistics", func(c *gin.Context) {
+		handlers.GetStatistics(c, database)
+	})
 	router.PUT("/games/:id", func(c *gin.Context) {
 		handlers.UpdateGame(c, database)
 	})
@@ -662,4 +665,155 @@ func toLower(s string) string {
 		result[i] = c
 	}
 	return string(result)
+}
+
+// TestGetStatistics_Integration 統計情報取得の結合テスト
+func TestGetStatistics_Integration(t *testing.T) {
+	database, dbPath := setupTestDB(t)
+	defer cleanupTestDB(t, database, dbPath)
+
+	router := setupTestServer(t, database)
+
+	series1 := "Final Fantasy"
+	series2 := "The Legend of Zelda"
+	genre1 := "RPG"
+	genre2 := "Action"
+
+	// テストデータの準備
+	games := []models.Game{
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC", Series: &series1, Genre: &genre1, Price: 5000},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC", Series: &series1, Genre: &genre1, Price: 6000},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch", Series: &series2, Genre: &genre2, Price: 7000},
+		{Title: "Super Mario Odyssey", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch", Genre: &genre2, Price: 0}, // 価格0は除外
+		{Title: "Game Without Genre", ReleaseYear: 2021, Publisher: "Publisher", Platform: "PC", Price: 3000},                           // ジャンルなし
+	}
+	for i := range games {
+		database.Create(&games[i])
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/games/statistics", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	t.Run("総数が正しく計算されること", func(t *testing.T) {
+		totalCount, ok := result["total_count"].(float64)
+		if !ok {
+			t.Fatal("total_count is not a number")
+		}
+		if int(totalCount) != 5 {
+			t.Errorf("expected total_count 5, got %d", int(totalCount))
+		}
+	})
+
+	t.Run("プラットフォーム別の集計が正しいこと", func(t *testing.T) {
+		platformCounts, ok := result["platform_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("platform_counts is not a map")
+		}
+
+		pcCount, ok := platformCounts["PC"].(float64)
+		if !ok || int(pcCount) != 3 {
+			t.Errorf("expected PC count 3, got %v", platformCounts["PC"])
+		}
+
+		switchCount, ok := platformCounts["Nintendo Switch"].(float64)
+		if !ok || int(switchCount) != 2 {
+			t.Errorf("expected Nintendo Switch count 2, got %v", platformCounts["Nintendo Switch"])
+		}
+	})
+
+	t.Run("発売会社別の集計が正しいこと", func(t *testing.T) {
+		publisherCounts, ok := result["publisher_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("publisher_counts is not a map")
+		}
+
+		squareEnixCount, ok := publisherCounts["Square Enix"].(float64)
+		if !ok || int(squareEnixCount) != 2 {
+			t.Errorf("expected Square Enix count 2, got %v", publisherCounts["Square Enix"])
+		}
+
+		nintendoCount, ok := publisherCounts["Nintendo"].(float64)
+		if !ok || int(nintendoCount) != 2 {
+			t.Errorf("expected Nintendo count 2, got %v", publisherCounts["Nintendo"])
+		}
+	})
+
+	t.Run("ジャンル別の集計が正しいこと（null除外）", func(t *testing.T) {
+		genreCounts, ok := result["genre_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("genre_counts is not a map")
+		}
+
+		rpgCount, ok := genreCounts["RPG"].(float64)
+		if !ok || int(rpgCount) != 2 {
+			t.Errorf("expected RPG count 2, got %v", genreCounts["RPG"])
+		}
+
+		actionCount, ok := genreCounts["Action"].(float64)
+		if !ok || int(actionCount) != 2 {
+			t.Errorf("expected Action count 2, got %v", genreCounts["Action"])
+		}
+
+		// ジャンルなしのゲームは集計に含まれない
+		if _, exists := genreCounts[""]; exists {
+			t.Error("genre_counts should not include empty genre")
+		}
+	})
+
+	t.Run("シリーズ別の集計が正しいこと（null除外）", func(t *testing.T) {
+		seriesCounts, ok := result["series_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("series_counts is not a map")
+		}
+
+		ffCount, ok := seriesCounts["Final Fantasy"].(float64)
+		if !ok || int(ffCount) != 2 {
+			t.Errorf("expected Final Fantasy count 2, got %v", seriesCounts["Final Fantasy"])
+		}
+
+		zeldaCount, ok := seriesCounts["The Legend of Zelda"].(float64)
+		if !ok || int(zeldaCount) != 1 {
+			t.Errorf("expected The Legend of Zelda count 1, got %v", seriesCounts["The Legend of Zelda"])
+		}
+
+		// シリーズなしのゲームは集計に含まれない
+		if _, exists := seriesCounts[""]; exists {
+			t.Error("series_counts should not include empty series")
+		}
+	})
+
+	t.Run("総購入金額が正しく計算されること（価格0の除外）", func(t *testing.T) {
+		totalPrice, ok := result["total_price"].(float64)
+		if !ok {
+			t.Fatal("total_price is not a number")
+		}
+		// 5000 + 6000 + 7000 + 3000 = 21000（価格0のゲームは除外）
+		expected := 21000
+		if int(totalPrice) != expected {
+			t.Errorf("expected total_price %d, got %d", expected, int(totalPrice))
+		}
+	})
+
+	t.Run("平均価格が正しく計算されること（価格0の除外）", func(t *testing.T) {
+		averagePrice, ok := result["average_price"].(float64)
+		if !ok {
+			t.Fatal("average_price is not a number")
+		}
+		// (5000 + 6000 + 7000 + 3000) / 4 = 5250
+		expected := 5250.0
+		if averagePrice != expected {
+			t.Errorf("expected average_price %.2f, got %.2f", expected, averagePrice)
+		}
+	})
 }

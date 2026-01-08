@@ -14,7 +14,7 @@ import (
 func setupRouter(db *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	
+
 	// ヘルスチェック
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -38,6 +38,9 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 	})
 	router.GET("/games/search", func(c *gin.Context) {
 		handlers.SearchGames(c, db)
+	})
+	router.GET("/games/statistics", func(c *gin.Context) {
+		handlers.GetStatistics(c, db)
 	})
 
 	return router

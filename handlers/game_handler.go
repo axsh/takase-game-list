@@ -210,3 +210,135 @@ func DeleteGame(c *gin.Context, db *gorm.DB) {
 
 	c.Status(http.StatusNoContent)
 }
+
+// GetStatistics 統計情報取得ハンドラー
+func GetStatistics(c *gin.Context, db *gorm.DB) {
+	var totalCount int64
+	if err := db.Model(&models.Game{}).Count(&totalCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get total count"})
+		return
+	}
+
+	// プラットフォーム別の集計
+	type PlatformCount struct {
+		Platform string
+		Count    int64
+	}
+	var platformCounts []PlatformCount
+	if err := db.Model(&models.Game{}).
+		Select("platform, COUNT(*) as count").
+		Group("platform").
+		Scan(&platformCounts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get platform counts"})
+		return
+	}
+	platformCountsMap := make(map[string]int)
+	for _, pc := range platformCounts {
+		platformCountsMap[pc.Platform] = int(pc.Count)
+	}
+
+	// 発売会社別の集計
+	type PublisherCount struct {
+		Publisher string
+		Count     int64
+	}
+	var publisherCounts []PublisherCount
+	if err := db.Model(&models.Game{}).
+		Select("publisher, COUNT(*) as count").
+		Group("publisher").
+		Scan(&publisherCounts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get publisher counts"})
+		return
+	}
+	publisherCountsMap := make(map[string]int)
+	for _, pc := range publisherCounts {
+		publisherCountsMap[pc.Publisher] = int(pc.Count)
+	}
+
+	// ジャンル別の集計（null除外）
+	type GenreCount struct {
+		Genre string
+		Count int64
+	}
+	var genreCounts []GenreCount
+	if err := db.Model(&models.Game{}).
+		Select("genre, COUNT(*) as count").
+		Where("genre IS NOT NULL AND genre != ''").
+		Group("genre").
+		Scan(&genreCounts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get genre counts"})
+		return
+	}
+	genreCountsMap := make(map[string]int)
+	for _, gc := range genreCounts {
+		genreCountsMap[gc.Genre] = int(gc.Count)
+	}
+
+	// シリーズ別の集計（null除外）
+	type SeriesCount struct {
+		Series string
+		Count  int64
+	}
+	var seriesCounts []SeriesCount
+	if err := db.Model(&models.Game{}).
+		Select("series, COUNT(*) as count").
+		Where("series IS NOT NULL AND series != ''").
+		Group("series").
+		Scan(&seriesCounts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get series counts"})
+		return
+	}
+	seriesCountsMap := make(map[string]int)
+	for _, sc := range seriesCounts {
+		seriesCountsMap[sc.Series] = int(sc.Count)
+	}
+
+	// 発売年別の集計
+	type YearCount struct {
+		Year  int
+		Count int64
+	}
+	var yearCounts []YearCount
+	if err := db.Model(&models.Game{}).
+		Select("release_year as year, COUNT(*) as count").
+		Group("release_year").
+		Scan(&yearCounts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get year counts"})
+		return
+	}
+	yearCountsMap := make(map[int]int)
+	for _, yc := range yearCounts {
+		yearCountsMap[yc.Year] = int(yc.Count)
+	}
+
+	// 価格の合計と平均（価格0の除外）
+	var priceStats struct {
+		Total int64
+		Count int64
+	}
+	if err := db.Model(&models.Game{}).
+		Select("COALESCE(SUM(price), 0) as total, COUNT(*) as count").
+		Where("price > 0").
+		Scan(&priceStats).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get price statistics"})
+		return
+	}
+
+	var averagePrice float64
+	if priceStats.Count > 0 {
+		averagePrice = float64(priceStats.Total) / float64(priceStats.Count)
+	}
+
+	statistics := gin.H{
+		"total_count":      int(totalCount),
+		"platform_counts":  platformCountsMap,
+		"publisher_counts": publisherCountsMap,
+		"genre_counts":     genreCountsMap,
+		"series_counts":    seriesCountsMap,
+		"year_counts":      yearCountsMap,
+		"total_price":      int(priceStats.Total),
+		"average_price":    averagePrice,
+	}
+
+	c.JSON(http.StatusOK, statistics)
+}
