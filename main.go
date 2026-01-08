@@ -4,8 +4,9 @@ import (
 	"log"
 	"net/http"
 
+	"takase-game-list/db"
+
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -30,12 +31,18 @@ func dbOK(db *gorm.DB) bool {
 }
 
 func main() {
-	db, err := gorm.Open(sqlite.Open("game-list.db"), &gorm.Config{})
+	// データベース接続の初期化
+	database, err := db.InitDB("game-list.db")
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		log.Fatalf("failed to initialize database: %v", err)
 	}
 
-	router := setupRouter(db)
+	// マイグレーション実行
+	if err := db.Migrate(database); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
+	}
+
+	router := setupRouter(database)
 	if err := router.Run(":8080"); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
