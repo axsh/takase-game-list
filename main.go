@@ -6,6 +6,7 @@ import (
 
 	"takase-game-list/db"
 	"takase-game-list/handlers"
+	"takase-game-list/middleware"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -14,6 +15,10 @@ import (
 func setupRouter(db *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+
+	// ミドルウェアの適用
+	router.Use(middleware.Logger())
+	router.Use(middleware.ErrorHandler())
 
 	// ヘルスチェック
 	router.GET("/health", func(c *gin.Context) {
