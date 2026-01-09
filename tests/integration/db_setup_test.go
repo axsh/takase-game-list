@@ -82,13 +82,13 @@ func TestDatabaseMigration_Integration(t *testing.T) {
 		t.Fatalf("failed to get column types: %v", err)
 	}
 
-	// 必須カラムが存在するか確認
+	// 必須カラムが存在するか確認（正規化後）
 	requiredColumns := map[string]bool{
 		"id":           false,
 		"title":        false,
 		"release_year": false,
-		"publisher":    false,
-		"platform":     false,
+		"publisher_id": false,
+		"price":        false,
 		"created_at":   false,
 		"updated_at":   false,
 	}
@@ -111,12 +111,23 @@ func TestGameModel_Integration(t *testing.T) {
 	database, dbPath := setupTestDB(t)
 	defer cleanupTestDB(t, database, dbPath)
 
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Test Publisher"}
+	if err := database.Create(&publisher).Error; err != nil {
+		t.Fatalf("failed to create publisher: %v", err)
+	}
+
+	platform := models.Platform{Name: "PC"}
+	if err := database.Create(&platform).Error; err != nil {
+		t.Fatalf("failed to create platform: %v", err)
+	}
+
 	// 必須項目のみでGameを作成
 	game := models.Game{
 		Title:       "Test Game",
 		ReleaseYear: 2024,
-		Publisher:   "Test Publisher",
-		Platform:    "PC",
+		PublisherID: publisher.ID,
+		Platforms:   []models.Platform{platform},
 	}
 
 	// データベースに保存
@@ -137,9 +148,9 @@ func TestGameModel_Integration(t *testing.T) {
 		t.Error("UpdatedAt was not set")
 	}
 
-	// データベースから取得して確認
+	// データベースから取得して確認（Preload）
 	var retrievedGame models.Game
-	if err := database.First(&retrievedGame, game.ID).Error; err != nil {
+	if err := database.Preload("Publisher").Preload("Platforms").First(&retrievedGame, game.ID).Error; err != nil {
 		t.Fatalf("failed to retrieve game: %v", err)
 	}
 
@@ -149,11 +160,11 @@ func TestGameModel_Integration(t *testing.T) {
 	if retrievedGame.ReleaseYear != 2024 {
 		t.Errorf("expected release year 2024, got %d", retrievedGame.ReleaseYear)
 	}
-	if retrievedGame.Publisher != "Test Publisher" {
-		t.Errorf("expected publisher 'Test Publisher', got '%s'", retrievedGame.Publisher)
+	if retrievedGame.Publisher.Name != "Test Publisher" {
+		t.Errorf("expected publisher 'Test Publisher', got '%s'", retrievedGame.Publisher.Name)
 	}
-	if retrievedGame.Platform != "PC" {
-		t.Errorf("expected platform 'PC', got '%s'", retrievedGame.Platform)
+	if len(retrievedGame.Platforms) != 1 || retrievedGame.Platforms[0].Name != "PC" {
+		t.Errorf("expected platform 'PC', got %v", retrievedGame.Platforms)
 	}
 }
 
@@ -161,18 +172,37 @@ func TestGameModelWithOptionalFields_Integration(t *testing.T) {
 	database, dbPath := setupTestDB(t)
 	defer cleanupTestDB(t, database, dbPath)
 
-	series := "Test Series"
-	genre := "RPG"
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Test Publisher 2"}
+	if err := database.Create(&publisher).Error; err != nil {
+		t.Fatalf("failed to create publisher: %v", err)
+	}
+
+	platform := models.Platform{Name: "Nintendo Switch"}
+	if err := database.Create(&platform).Error; err != nil {
+		t.Fatalf("failed to create platform: %v", err)
+	}
+
+	series := models.Series{Name: "Test Series"}
+	if err := database.Create(&series).Error; err != nil {
+		t.Fatalf("failed to create series: %v", err)
+	}
+
+	genre := models.Genre{Name: "RPG"}
+	if err := database.Create(&genre).Error; err != nil {
+		t.Fatalf("failed to create genre: %v", err)
+	}
+
 	price := 5000
 
 	// 全項目を指定してGameを作成
 	game := models.Game{
 		Title:       "Test Game 2",
 		ReleaseYear: 2023,
-		Publisher:   "Test Publisher 2",
-		Platform:    "Nintendo Switch",
-		Series:      &series,
-		Genre:       &genre,
+		PublisherID: publisher.ID,
+		SeriesID:    &series.ID,
+		Platforms:   []models.Platform{platform},
+		Genres:      []models.Genre{genre},
 		Price:       price,
 	}
 
@@ -181,17 +211,18 @@ func TestGameModelWithOptionalFields_Integration(t *testing.T) {
 		t.Fatalf("failed to create game: %v", err)
 	}
 
-	// データベースから取得して確認
+	// データベースから取得して確認（Preload）
 	var retrievedGame models.Game
-	if err := database.First(&retrievedGame, game.ID).Error; err != nil {
+	if err := database.Preload("Publisher").Preload("Platforms").Preload("Series").Preload("Genres").
+		First(&retrievedGame, game.ID).Error; err != nil {
 		t.Fatalf("failed to retrieve game: %v", err)
 	}
 
-	if retrievedGame.Series == nil || *retrievedGame.Series != series {
-		t.Errorf("expected series '%s', got %v", series, retrievedGame.Series)
+	if retrievedGame.Series == nil || retrievedGame.Series.Name != "Test Series" {
+		t.Errorf("expected series 'Test Series', got %v", retrievedGame.Series)
 	}
-	if retrievedGame.Genre == nil || *retrievedGame.Genre != genre {
-		t.Errorf("expected genre '%s', got %v", genre, retrievedGame.Genre)
+	if len(retrievedGame.Genres) != 1 || retrievedGame.Genres[0].Name != "RPG" {
+		t.Errorf("expected genre 'RPG', got %v", retrievedGame.Genres)
 	}
 	if retrievedGame.Price != price {
 		t.Errorf("expected price %d, got %d", price, retrievedGame.Price)

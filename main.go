@@ -48,6 +48,32 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 		handlers.GetStatistics(c, db)
 	})
 
+	// マスタデータAPI
+	router.GET("/publishers", func(c *gin.Context) {
+		handlers.GetPublishers(c, db)
+	})
+	router.POST("/publishers", func(c *gin.Context) {
+		handlers.CreatePublisher(c, db)
+	})
+	router.GET("/platforms", func(c *gin.Context) {
+		handlers.GetPlatforms(c, db)
+	})
+	router.POST("/platforms", func(c *gin.Context) {
+		handlers.CreatePlatform(c, db)
+	})
+	router.GET("/series", func(c *gin.Context) {
+		handlers.GetSeries(c, db)
+	})
+	router.POST("/series", func(c *gin.Context) {
+		handlers.CreateSeries(c, db)
+	})
+	router.GET("/genres", func(c *gin.Context) {
+		handlers.GetGenres(c, db)
+	})
+	router.POST("/genres", func(c *gin.Context) {
+		handlers.CreateGenre(c, db)
+	})
+
 	return router
 }
 
@@ -69,6 +95,11 @@ func main() {
 	// マイグレーション実行
 	if err := db.Migrate(database); err != nil {
 		log.Fatalf("failed to run migrations: %v", err)
+	}
+
+	// シードデータの投入（オプション）
+	if err := db.SeedMasterData(database); err != nil {
+		log.Printf("warning: failed to seed master data: %v", err)
 	}
 
 	router := setupRouter(database)

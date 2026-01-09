@@ -101,12 +101,19 @@ func TestLogger_Integration(t *testing.T) {
 
 	router := setupTestServerWithMiddleware(t, database)
 
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Test Publisher"}
+	database.Create(&publisher)
+
+	platform := models.Platform{Name: "PC"}
+	database.Create(&platform)
+
 	// テストデータの準備
 	game := models.Game{
 		Title:       "Test Game",
 		ReleaseYear: 2024,
-		Publisher:   "Test Publisher",
-		Platform:    "PC",
+		PublisherID: publisher.ID,
+		Platforms:   []models.Platform{platform},
 	}
 	database.Create(&game)
 
@@ -122,11 +129,18 @@ func TestLogger_Integration(t *testing.T) {
 			}
 		}()
 
+		// マスタデータの作成（既に存在する場合は取得）
+		var publisher2 models.Publisher
+		database.FirstOrCreate(&publisher2, models.Publisher{Name: "Publisher"})
+
+		var platform2 models.Platform
+		database.FirstOrCreate(&platform2, models.Platform{Name: "PC"})
+
 		reqBody := map[string]interface{}{
 			"title":        "New Game",
 			"release_year": 2024,
-			"publisher":    "Publisher",
-			"platform":     "PC",
+			"publisher_id": publisher2.ID,
+			"platform_ids": []uint{platform2.ID},
 		}
 		jsonBody, _ := json.Marshal(reqBody)
 
@@ -292,11 +306,18 @@ func TestMiddlewareWithExistingEndpoints_Integration(t *testing.T) {
 	router := setupTestServerWithMiddleware(t, database)
 
 	t.Run("ゲーム登録でミドルウェアが正常に動作すること", func(t *testing.T) {
+		// マスタデータの作成
+		publisher := models.Publisher{Name: "Test Publisher"}
+		database.Create(&publisher)
+
+		platform := models.Platform{Name: "PC"}
+		database.Create(&platform)
+
 		reqBody := map[string]interface{}{
 			"title":        "Test Game",
 			"release_year": 2024,
-			"publisher":    "Test Publisher",
-			"platform":     "PC",
+			"publisher_id": publisher.ID,
+			"platform_ids": []uint{platform.ID},
 		}
 		jsonBody, _ := json.Marshal(reqBody)
 

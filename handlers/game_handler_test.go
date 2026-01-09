@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,6 +36,13 @@ func TestCreateGame_Unit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("正常なゲーム登録", func(t *testing.T) {
+		// マスタデータの作成
+		publisher := models.Publisher{Name: "Test Publisher"}
+		db.Create(&publisher)
+
+		platform := models.Platform{Name: "PC"}
+		db.Create(&platform)
+
 		router := gin.New()
 		router.POST("/games", func(c *gin.Context) {
 			CreateGame(c, db)
@@ -43,8 +51,8 @@ func TestCreateGame_Unit(t *testing.T) {
 		reqBody := map[string]interface{}{
 			"title":        "Test Game",
 			"release_year": 2024,
-			"publisher":    "Test Publisher",
-			"platform":     "PC",
+			"publisher_id": publisher.ID,
+			"platform_ids": []uint{platform.ID},
 		}
 		jsonBody, _ := json.Marshal(reqBody)
 
@@ -88,10 +96,21 @@ func TestGetGames_Unit(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 
+	// マスタデータの作成
+	publisher1 := models.Publisher{Name: "Publisher 1"}
+	publisher2 := models.Publisher{Name: "Publisher 2"}
+	db.Create(&publisher1)
+	db.Create(&publisher2)
+
+	platform1 := models.Platform{Name: "PC"}
+	platform2 := models.Platform{Name: "Nintendo Switch"}
+	db.Create(&platform1)
+	db.Create(&platform2)
+
 	// テストデータの準備
 	games := []models.Game{
-		{Title: "Game 1", ReleaseYear: 2024, Publisher: "Publisher 1", Platform: "PC"},
-		{Title: "Game 2", ReleaseYear: 2023, Publisher: "Publisher 2", Platform: "Nintendo Switch"},
+		{Title: "Game 1", ReleaseYear: 2024, PublisherID: publisher1.ID, Platforms: []models.Platform{platform1}},
+		{Title: "Game 2", ReleaseYear: 2023, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}},
 	}
 	for i := range games {
 		db.Create(&games[i])
@@ -119,12 +138,19 @@ func TestUpdateGame_Unit(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Original Publisher"}
+	db.Create(&publisher)
+
+	platform := models.Platform{Name: "PC"}
+	db.Create(&platform)
+
 	// テストデータの準備
 	game := models.Game{
 		Title:       "Original Game",
 		ReleaseYear: 2024,
-		Publisher:   "Original Publisher",
-		Platform:    "PC",
+		PublisherID: publisher.ID,
+		Platforms:   []models.Platform{platform},
 	}
 	db.Create(&game)
 
@@ -151,7 +177,7 @@ func TestUpdateGame_Unit(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &updatedGame)
 		assert.NoError(t, err)
 		assert.Equal(t, "Updated Game", updatedGame.Title)
-		assert.Equal(t, "Original Publisher", updatedGame.Publisher)
+		assert.Equal(t, "Original Publisher", updatedGame.Publisher.Name)
 	})
 
 	t.Run("存在しないID", func(t *testing.T) {
@@ -174,12 +200,19 @@ func TestDeleteGame_Unit(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Publisher"}
+	db.Create(&publisher)
+
+	platform := models.Platform{Name: "PC"}
+	db.Create(&platform)
+
 	// テストデータの準備
 	game := models.Game{
 		Title:       "Game to Delete",
 		ReleaseYear: 2024,
-		Publisher:   "Publisher",
-		Platform:    "PC",
+		PublisherID: publisher.ID,
+		Platforms:   []models.Platform{platform},
 	}
 	db.Create(&game)
 
@@ -218,11 +251,22 @@ func TestSearchGames_Unit(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 
+	// マスタデータの作成
+	publisher1 := models.Publisher{Name: "Square Enix"}
+	publisher2 := models.Publisher{Name: "Nintendo"}
+	db.Create(&publisher1)
+	db.Create(&publisher2)
+
+	platform1 := models.Platform{Name: "PC"}
+	platform2 := models.Platform{Name: "Nintendo Switch"}
+	db.Create(&platform1)
+	db.Create(&platform2)
+
 	// テストデータの準備
 	games := []models.Game{
-		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC"},
-		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC"},
-		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch"},
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, PublisherID: publisher1.ID, Platforms: []models.Platform{platform1}},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, PublisherID: publisher1.ID, Platforms: []models.Platform{platform1}},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}},
 	}
 	for i := range games {
 		db.Create(&games[i])
@@ -281,14 +325,28 @@ func TestGetGamesWithFilters_Unit(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 
-	series := "Final Fantasy"
-	genre := "RPG"
+	// マスタデータの作成
+	publisher1 := models.Publisher{Name: "Square Enix"}
+	publisher2 := models.Publisher{Name: "Nintendo"}
+	db.Create(&publisher1)
+	db.Create(&publisher2)
+
+	platform1 := models.Platform{Name: "PC"}
+	platform2 := models.Platform{Name: "Nintendo Switch"}
+	db.Create(&platform1)
+	db.Create(&platform2)
+
+	series := models.Series{Name: "Final Fantasy"}
+	db.Create(&series)
+
+	genre := models.Genre{Name: "RPG"}
+	db.Create(&genre)
 
 	// テストデータの準備
 	games := []models.Game{
-		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC", Series: &series, Genre: &genre},
-		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC", Series: &series, Genre: &genre},
-		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch"},
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, PublisherID: publisher1.ID, SeriesID: &series.ID, Platforms: []models.Platform{platform1}, Genres: []models.Genre{genre}},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, PublisherID: publisher1.ID, SeriesID: &series.ID, Platforms: []models.Platform{platform1}, Genres: []models.Genre{genre}},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}},
 	}
 	for i := range games {
 		db.Create(&games[i])
@@ -300,7 +358,7 @@ func TestGetGamesWithFilters_Unit(t *testing.T) {
 	})
 
 	t.Run("プラットフォームフィルタ", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?platform=PC", nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?platform_ids=%d", platform1.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -312,12 +370,13 @@ func TestGetGamesWithFilters_Unit(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, result, 2)
 		for _, game := range result {
-			assert.Equal(t, "PC", game.Platform)
+			assert.Greater(t, len(game.Platforms), 0)
+			assert.Equal(t, "PC", game.Platforms[0].Name)
 		}
 	})
 
 	t.Run("発売会社フィルタ", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?publisher=Square+Enix", nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?publisher_id=%d", publisher1.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -329,12 +388,12 @@ func TestGetGamesWithFilters_Unit(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, result, 2)
 		for _, game := range result {
-			assert.Equal(t, "Square Enix", game.Publisher)
+			assert.Equal(t, "Square Enix", game.Publisher.Name)
 		}
 	})
 
 	t.Run("ジャンルフィルタ", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?genre=RPG", nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?genre_ids=%d", genre.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -346,8 +405,8 @@ func TestGetGamesWithFilters_Unit(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, result, 2)
 		for _, game := range result {
-			assert.NotNil(t, game.Genre)
-			assert.Equal(t, "RPG", *game.Genre)
+			assert.Greater(t, len(game.Genres), 0)
+			assert.Equal(t, "RPG", game.Genres[0].Name)
 		}
 	})
 
@@ -370,7 +429,7 @@ func TestGetGamesWithFilters_Unit(t *testing.T) {
 	})
 
 	t.Run("複数条件の組み合わせ", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?platform=PC&publisher=Square+Enix", nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?platform_ids=%d&publisher_id=%d", platform1.ID, publisher1.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -382,8 +441,9 @@ func TestGetGamesWithFilters_Unit(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, result, 2)
 		for _, game := range result {
-			assert.Equal(t, "PC", game.Platform)
-			assert.Equal(t, "Square Enix", game.Publisher)
+			assert.Greater(t, len(game.Platforms), 0)
+			assert.Equal(t, "PC", game.Platforms[0].Name)
+			assert.Equal(t, "Square Enix", game.Publisher.Name)
 		}
 	})
 }

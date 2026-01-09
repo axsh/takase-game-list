@@ -33,10 +33,26 @@ func InitDB(databasePath string) (*gorm.DB, error) {
 
 // Migrate データベースのマイグレーションを実行する
 func Migrate(db *gorm.DB) error {
-	err := db.AutoMigrate(&models.Game{})
-	if err != nil {
+	// 新規モデルのマイグレーション
+	if err := db.AutoMigrate(&models.Publisher{}); err != nil {
 		return err
 	}
+	if err := db.AutoMigrate(&models.Platform{}); err != nil {
+		return err
+	}
+	if err := db.AutoMigrate(&models.Series{}); err != nil {
+		return err
+	}
+	if err := db.AutoMigrate(&models.Genre{}); err != nil {
+		return err
+	}
+
+	// Gameモデルのマイグレーション（正規化後）
+	// 中間テーブル（game_platforms, game_genres）はGORMが自動生成する
+	if err := db.AutoMigrate(&models.Game{}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
