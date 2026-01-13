@@ -53,11 +53,18 @@ func TestCreateGame_Integration(t *testing.T) {
 	router := setupTestServer(t, database)
 
 	t.Run("必須項目のみで登録できること", func(t *testing.T) {
+		// マスタデータの作成
+		publisher := models.Publisher{Name: "Test Publisher"}
+		database.Create(&publisher)
+
+		platform := models.Platform{Name: "PC"}
+		database.Create(&platform)
+
 		reqBody := map[string]interface{}{
 			"title":        "Test Game",
 			"release_year": 2024,
-			"publisher":    "Test Publisher",
-			"platform":     "PC",
+			"publisher_id": publisher.ID,
+			"platform_ids": []uint{platform.ID},
 		}
 		jsonBody, _ := json.Marshal(reqBody)
 
@@ -88,15 +95,26 @@ func TestCreateGame_Integration(t *testing.T) {
 	})
 
 	t.Run("全項目を指定して登録できること", func(t *testing.T) {
-		series := "Test Series"
-		genre := "RPG"
+		// マスタデータの作成
+		publisher := models.Publisher{Name: "Test Publisher 2"}
+		database.Create(&publisher)
+
+		platform := models.Platform{Name: "Nintendo Switch"}
+		database.Create(&platform)
+
+		series := models.Series{Name: "Test Series"}
+		database.Create(&series)
+
+		genre := models.Genre{Name: "RPG"}
+		database.Create(&genre)
+
 		reqBody := map[string]interface{}{
 			"title":        "Test Game 2",
 			"release_year": 2023,
-			"publisher":    "Test Publisher 2",
-			"platform":     "Nintendo Switch",
-			"series":       series,
-			"genre":        genre,
+			"publisher_id": publisher.ID,
+			"platform_ids": []uint{platform.ID},
+			"series_id":    series.ID,
+			"genre_ids":    []uint{genre.ID},
 			"price":        5000,
 		}
 		jsonBody, _ := json.Marshal(reqBody)
@@ -116,11 +134,11 @@ func TestCreateGame_Integration(t *testing.T) {
 			t.Fatalf("failed to unmarshal response: %v", err)
 		}
 
-		if game.Series == nil || *game.Series != series {
-			t.Errorf("expected series '%s', got %v", series, game.Series)
+		if game.Series == nil || game.Series.Name != "Test Series" {
+			t.Errorf("expected series 'Test Series', got %v", game.Series)
 		}
-		if game.Genre == nil || *game.Genre != genre {
-			t.Errorf("expected genre '%s', got %v", genre, game.Genre)
+		if len(game.Genres) != 1 || game.Genres[0].Name != "RPG" {
+			t.Errorf("expected genre 'RPG', got %v", game.Genres)
 		}
 		if game.Price != 5000 {
 			t.Errorf("expected price 5000, got %d", game.Price)
@@ -153,10 +171,21 @@ func TestGetGames_Integration(t *testing.T) {
 
 	router := setupTestServer(t, database)
 
+	// マスタデータの作成
+	publisher1 := models.Publisher{Name: "Publisher 1"}
+	publisher2 := models.Publisher{Name: "Publisher 2"}
+	database.Create(&publisher1)
+	database.Create(&publisher2)
+
+	platform1 := models.Platform{Name: "PC"}
+	platform2 := models.Platform{Name: "Nintendo Switch"}
+	database.Create(&platform1)
+	database.Create(&platform2)
+
 	// テストデータの準備
 	games := []models.Game{
-		{Title: "Game 1", ReleaseYear: 2024, Publisher: "Publisher 1", Platform: "PC"},
-		{Title: "Game 2", ReleaseYear: 2023, Publisher: "Publisher 2", Platform: "Nintendo Switch"},
+		{Title: "Game 1", ReleaseYear: 2024, PublisherID: publisher1.ID, Platforms: []models.Platform{platform1}},
+		{Title: "Game 2", ReleaseYear: 2023, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}},
 	}
 	for i := range games {
 		database.Create(&games[i])
@@ -238,12 +267,19 @@ func TestUpdateGame_Integration(t *testing.T) {
 
 	router := setupTestServer(t, database)
 
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Original Publisher"}
+	database.Create(&publisher)
+
+	platform := models.Platform{Name: "PC"}
+	database.Create(&platform)
+
 	// テストデータの準備
 	game := models.Game{
 		Title:       "Original Game",
 		ReleaseYear: 2024,
-		Publisher:   "Original Publisher",
-		Platform:    "PC",
+		PublisherID: publisher.ID,
+		Platforms:   []models.Platform{platform},
 	}
 	database.Create(&game)
 
@@ -272,8 +308,8 @@ func TestUpdateGame_Integration(t *testing.T) {
 		if updatedGame.Title != "Updated Game" {
 			t.Errorf("expected title 'Updated Game', got '%s'", updatedGame.Title)
 		}
-		if updatedGame.Publisher != "Original Publisher" {
-			t.Errorf("expected publisher to remain 'Original Publisher', got '%s'", updatedGame.Publisher)
+		if updatedGame.Publisher.Name != "Original Publisher" {
+			t.Errorf("expected publisher to remain 'Original Publisher', got '%s'", updatedGame.Publisher.Name)
 		}
 	})
 
@@ -320,12 +356,19 @@ func TestDeleteGame_Integration(t *testing.T) {
 
 	router := setupTestServer(t, database)
 
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Publisher"}
+	database.Create(&publisher)
+
+	platform := models.Platform{Name: "PC"}
+	database.Create(&platform)
+
 	// テストデータの準備
 	game := models.Game{
 		Title:       "Game to Delete",
 		ReleaseYear: 2024,
-		Publisher:   "Publisher",
-		Platform:    "PC",
+		PublisherID: publisher.ID,
+		Platforms:   []models.Platform{platform},
 	}
 	database.Create(&game)
 
@@ -384,12 +427,23 @@ func TestSearchGames_Integration(t *testing.T) {
 
 	router := setupTestServer(t, database)
 
+	// マスタデータの作成
+	publisher1 := models.Publisher{Name: "Square Enix"}
+	publisher2 := models.Publisher{Name: "Nintendo"}
+	database.Create(&publisher1)
+	database.Create(&publisher2)
+
+	platform1 := models.Platform{Name: "PC"}
+	platform2 := models.Platform{Name: "Nintendo Switch"}
+	database.Create(&platform1)
+	database.Create(&platform2)
+
 	// テストデータの準備
 	games := []models.Game{
-		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC"},
-		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC"},
-		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch"},
-		{Title: "Super Mario Odyssey", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch"},
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, PublisherID: publisher1.ID, Platforms: []models.Platform{platform1}},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, PublisherID: publisher1.ID, Platforms: []models.Platform{platform1}},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}},
+		{Title: "Super Mario Odyssey", ReleaseYear: 2017, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}},
 	}
 	for i := range games {
 		database.Create(&games[i])
@@ -468,24 +522,43 @@ func TestFilterGames_Integration(t *testing.T) {
 
 	router := setupTestServer(t, database)
 
-	series1 := "Final Fantasy"
-	series2 := "The Legend of Zelda"
-	genre1 := "RPG"
-	genre2 := "Action"
+	// マスタデータの作成
+	publisher1 := models.Publisher{Name: "Square Enix"}
+	publisher2 := models.Publisher{Name: "Nintendo"}
+	database.Create(&publisher1)
+	database.Create(&publisher2)
+
+	platform1 := models.Platform{Name: "PC"}
+	platform2 := models.Platform{Name: "Nintendo Switch"}
+	database.Create(&platform1)
+	database.Create(&platform2)
+
+	series1 := models.Series{Name: "Final Fantasy"}
+	series2 := models.Series{Name: "The Legend of Zelda"}
+	database.Create(&series1)
+	database.Create(&series2)
+
+	genre1 := models.Genre{Name: "RPG"}
+	genre2 := models.Genre{Name: "Action"}
+	database.Create(&genre1)
+	database.Create(&genre2)
 
 	// テストデータの準備
 	games := []models.Game{
-		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC", Series: &series1, Genre: &genre1},
-		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC", Series: &series1, Genre: &genre1},
-		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch", Series: &series2, Genre: &genre2},
-		{Title: "Super Mario Odyssey", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch", Genre: &genre2},
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, PublisherID: publisher1.ID, SeriesID: &series1.ID, Platforms: []models.Platform{platform1}, Genres: []models.Genre{genre1}},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, PublisherID: publisher1.ID, SeriesID: &series1.ID, Platforms: []models.Platform{platform1}, Genres: []models.Genre{genre1}},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, PublisherID: publisher2.ID, SeriesID: &series2.ID, Platforms: []models.Platform{platform2}, Genres: []models.Genre{genre2}},
+		{Title: "Super Mario Odyssey", ReleaseYear: 2017, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}, Genres: []models.Genre{genre2}},
 	}
 	for i := range games {
 		database.Create(&games[i])
 	}
 
 	t.Run("プラットフォームフィルタが動作すること", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?platform=PC", nil)
+		// platform_idsでフィルタリング（正規化後）
+		var platform models.Platform
+		database.Where("name = ?", "PC").First(&platform)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?platform_ids=%d", platform.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -503,14 +576,17 @@ func TestFilterGames_Integration(t *testing.T) {
 			t.Errorf("expected 2 games, got %d", len(result))
 		}
 		for _, game := range result {
-			if game.Platform != "PC" {
-				t.Errorf("expected platform 'PC', got '%s'", game.Platform)
+			if len(game.Platforms) == 0 || game.Platforms[0].Name != "PC" {
+				t.Errorf("expected platform 'PC', got %v", game.Platforms)
 			}
 		}
 	})
 
 	t.Run("発売会社フィルタが動作すること", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?publisher=Square+Enix", nil)
+		// publisher_idでフィルタリング（正規化後）
+		var publisher models.Publisher
+		database.Where("name = ?", "Square Enix").First(&publisher)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?publisher_id=%d", publisher.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -528,14 +604,17 @@ func TestFilterGames_Integration(t *testing.T) {
 			t.Errorf("expected 2 games, got %d", len(result))
 		}
 		for _, game := range result {
-			if game.Publisher != "Square Enix" {
-				t.Errorf("expected publisher 'Square Enix', got '%s'", game.Publisher)
+			if game.Publisher.Name != "Square Enix" {
+				t.Errorf("expected publisher 'Square Enix', got '%s'", game.Publisher.Name)
 			}
 		}
 	})
 
 	t.Run("ジャンルフィルタが動作すること", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?genre=RPG", nil)
+		// genre_idsでフィルタリング（正規化後）
+		var genre models.Genre
+		database.Where("name = ?", "RPG").First(&genre)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?genre_ids=%d", genre.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -553,14 +632,17 @@ func TestFilterGames_Integration(t *testing.T) {
 			t.Errorf("expected 2 games, got %d", len(result))
 		}
 		for _, game := range result {
-			if game.Genre == nil || *game.Genre != "RPG" {
-				t.Errorf("expected genre 'RPG', got %v", game.Genre)
+			if len(game.Genres) == 0 || game.Genres[0].Name != "RPG" {
+				t.Errorf("expected genre 'RPG', got %v", game.Genres)
 			}
 		}
 	})
 
 	t.Run("シリーズフィルタが動作すること", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?series=Final+Fantasy", nil)
+		// series_idでフィルタリング（正規化後）
+		var series models.Series
+		database.Where("name = ?", "Final Fantasy").First(&series)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?series_id=%d", series.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -578,7 +660,7 @@ func TestFilterGames_Integration(t *testing.T) {
 			t.Errorf("expected 2 games, got %d", len(result))
 		}
 		for _, game := range result {
-			if game.Series == nil || *game.Series != "Final Fantasy" {
+			if game.Series == nil || game.Series.Name != "Final Fantasy" {
 				t.Errorf("expected series 'Final Fantasy', got %v", game.Series)
 			}
 		}
@@ -610,7 +692,12 @@ func TestFilterGames_Integration(t *testing.T) {
 	})
 
 	t.Run("複数条件の組み合わせが動作すること", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/games?platform=Nintendo+Switch&publisher=Nintendo", nil)
+		// platform_idsとpublisher_idでフィルタリング（正規化後）
+		var platform models.Platform
+		var publisher models.Publisher
+		database.Where("name = ?", "Nintendo Switch").First(&platform)
+		database.Where("name = ?", "Nintendo").First(&publisher)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/games?platform_ids=%d&publisher_id=%d", platform.ID, publisher.ID), nil)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -628,11 +715,11 @@ func TestFilterGames_Integration(t *testing.T) {
 			t.Errorf("expected 2 games, got %d", len(result))
 		}
 		for _, game := range result {
-			if game.Platform != "Nintendo Switch" {
-				t.Errorf("expected platform 'Nintendo Switch', got '%s'", game.Platform)
+			if len(game.Platforms) == 0 || game.Platforms[0].Name != "Nintendo Switch" {
+				t.Errorf("expected platform 'Nintendo Switch', got %v", game.Platforms)
 			}
-			if game.Publisher != "Nintendo" {
-				t.Errorf("expected publisher 'Nintendo', got '%s'", game.Publisher)
+			if game.Publisher.Name != "Nintendo" {
+				t.Errorf("expected publisher 'Nintendo', got '%s'", game.Publisher.Name)
 			}
 		}
 	})
@@ -674,18 +761,36 @@ func TestGetStatistics_Integration(t *testing.T) {
 
 	router := setupTestServer(t, database)
 
-	series1 := "Final Fantasy"
-	series2 := "The Legend of Zelda"
-	genre1 := "RPG"
-	genre2 := "Action"
+	// マスタデータの作成
+	publisher1 := models.Publisher{Name: "Square Enix"}
+	publisher2 := models.Publisher{Name: "Nintendo"}
+	publisher3 := models.Publisher{Name: "Publisher"}
+	database.Create(&publisher1)
+	database.Create(&publisher2)
+	database.Create(&publisher3)
+
+	platform1 := models.Platform{Name: "PC"}
+	platform2 := models.Platform{Name: "Nintendo Switch"}
+	database.Create(&platform1)
+	database.Create(&platform2)
+
+	series1 := models.Series{Name: "Final Fantasy"}
+	series2 := models.Series{Name: "The Legend of Zelda"}
+	database.Create(&series1)
+	database.Create(&series2)
+
+	genre1 := models.Genre{Name: "RPG"}
+	genre2 := models.Genre{Name: "Action"}
+	database.Create(&genre1)
+	database.Create(&genre2)
 
 	// テストデータの準備
 	games := []models.Game{
-		{Title: "Final Fantasy VII", ReleaseYear: 2020, Publisher: "Square Enix", Platform: "PC", Series: &series1, Genre: &genre1, Price: 5000},
-		{Title: "Final Fantasy XV", ReleaseYear: 2016, Publisher: "Square Enix", Platform: "PC", Series: &series1, Genre: &genre1, Price: 6000},
-		{Title: "The Legend of Zelda", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch", Series: &series2, Genre: &genre2, Price: 7000},
-		{Title: "Super Mario Odyssey", ReleaseYear: 2017, Publisher: "Nintendo", Platform: "Nintendo Switch", Genre: &genre2, Price: 0}, // 価格0は除外
-		{Title: "Game Without Genre", ReleaseYear: 2021, Publisher: "Publisher", Platform: "PC", Price: 3000},                           // ジャンルなし
+		{Title: "Final Fantasy VII", ReleaseYear: 2020, PublisherID: publisher1.ID, SeriesID: &series1.ID, Platforms: []models.Platform{platform1}, Genres: []models.Genre{genre1}, Price: 5000},
+		{Title: "Final Fantasy XV", ReleaseYear: 2016, PublisherID: publisher1.ID, SeriesID: &series1.ID, Platforms: []models.Platform{platform1}, Genres: []models.Genre{genre1}, Price: 6000},
+		{Title: "The Legend of Zelda", ReleaseYear: 2017, PublisherID: publisher2.ID, SeriesID: &series2.ID, Platforms: []models.Platform{platform2}, Genres: []models.Genre{genre2}, Price: 7000},
+		{Title: "Super Mario Odyssey", ReleaseYear: 2017, PublisherID: publisher2.ID, Platforms: []models.Platform{platform2}, Genres: []models.Genre{genre2}, Price: 0}, // 価格0は除外
+		{Title: "Game Without Genre", ReleaseYear: 2021, PublisherID: publisher3.ID, Platforms: []models.Platform{platform1}, Genres: []models.Genre{}, Price: 3000},   // ジャンルなし
 	}
 	for i := range games {
 		database.Create(&games[i])
@@ -814,6 +919,181 @@ func TestGetStatistics_Integration(t *testing.T) {
 		expected := 5250.0
 		if averagePrice != expected {
 			t.Errorf("expected average_price %.2f, got %.2f", expected, averagePrice)
+		}
+	})
+}
+
+// TestGetStatistics_ExcludeDeletedGames_Integration 削除されたゲームが統計情報に含まれないことを確認するテスト
+func TestGetStatistics_ExcludeDeletedGames_Integration(t *testing.T) {
+	database, dbPath := setupTestDB(t)
+	defer cleanupTestDB(t, database, dbPath)
+
+	router := setupTestServer(t, database)
+
+	// マスタデータの作成
+	publisher := models.Publisher{Name: "Test Publisher"}
+	platform := models.Platform{Name: "PC"}
+	series := models.Series{Name: "Test Series"}
+	genre := models.Genre{Name: "RPG"}
+
+	database.Create(&publisher)
+	database.Create(&platform)
+	database.Create(&series)
+	database.Create(&genre)
+
+	// テストデータの準備（削除前の統計）
+	game1 := models.Game{
+		Title:       "Game 1",
+		ReleaseYear: 2020,
+		PublisherID: publisher.ID,
+		SeriesID:    &series.ID,
+		Platforms:   []models.Platform{platform},
+		Genres:      []models.Genre{genre},
+		Price:       5000,
+	}
+	game2 := models.Game{
+		Title:       "Game 2",
+		ReleaseYear: 2021,
+		PublisherID: publisher.ID,
+		Platforms:   []models.Platform{platform},
+		Genres:      []models.Genre{genre},
+		Price:       6000,
+	}
+	database.Create(&game1)
+	database.Create(&game2)
+
+	// 削除前の統計情報を取得
+	req1 := httptest.NewRequest(http.MethodGet, "/games/statistics", nil)
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w1.Code)
+	}
+
+	var result1 map[string]interface{}
+	if err := json.Unmarshal(w1.Body.Bytes(), &result1); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	// 削除前の確認
+	totalCount1, _ := result1["total_count"].(float64)
+	if int(totalCount1) != 2 {
+		t.Errorf("expected total_count 2 before deletion, got %d", int(totalCount1))
+	}
+
+	// game1を削除（ソフトデリート）
+	database.Delete(&game1)
+
+	// 削除後の統計情報を取得
+	req2 := httptest.NewRequest(http.MethodGet, "/games/statistics", nil)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w2.Code)
+	}
+
+	var result2 map[string]interface{}
+	if err := json.Unmarshal(w2.Body.Bytes(), &result2); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	// 削除後の確認
+	t.Run("総数が削除されたゲームを除外すること", func(t *testing.T) {
+		totalCount2, ok := result2["total_count"].(float64)
+		if !ok {
+			t.Fatal("total_count is not a number")
+		}
+		if int(totalCount2) != 1 {
+			t.Errorf("expected total_count 1 after deletion, got %d", int(totalCount2))
+		}
+	})
+
+	t.Run("プラットフォーム別の集計が削除されたゲームを除外すること", func(t *testing.T) {
+		platformCounts, ok := result2["platform_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("platform_counts is not a map")
+		}
+		pcCount, ok := platformCounts["PC"].(float64)
+		if !ok || int(pcCount) != 1 {
+			t.Errorf("expected PC count 1 after deletion, got %v", platformCounts["PC"])
+		}
+	})
+
+	t.Run("発売会社別の集計が削除されたゲームを除外すること", func(t *testing.T) {
+		publisherCounts, ok := result2["publisher_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("publisher_counts is not a map")
+		}
+		pubCount, ok := publisherCounts["Test Publisher"].(float64)
+		if !ok || int(pubCount) != 1 {
+			t.Errorf("expected Test Publisher count 1 after deletion, got %v", publisherCounts["Test Publisher"])
+		}
+	})
+
+	t.Run("ジャンル別の集計が削除されたゲームを除外すること", func(t *testing.T) {
+		genreCounts, ok := result2["genre_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("genre_counts is not a map")
+		}
+		rpgCount, ok := genreCounts["RPG"].(float64)
+		if !ok || int(rpgCount) != 1 {
+			t.Errorf("expected RPG count 1 after deletion, got %v", genreCounts["RPG"])
+		}
+	})
+
+	t.Run("シリーズ別の集計が削除されたゲームを除外すること", func(t *testing.T) {
+		seriesCounts, ok := result2["series_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("series_counts is not a map")
+		}
+		// シリーズが設定されていたgame1が削除されたので、シリーズ別の集計には含まれない
+		testSeriesCount, exists := seriesCounts["Test Series"]
+		if exists {
+			count, ok := testSeriesCount.(float64)
+			if ok && int(count) != 0 {
+				t.Errorf("expected Test Series count 0 after deletion, got %v", testSeriesCount)
+			}
+		}
+	})
+
+	t.Run("発売年別の集計が削除されたゲームを除外すること", func(t *testing.T) {
+		yearCounts, ok := result2["year_counts"].(map[string]interface{})
+		if !ok {
+			t.Fatal("year_counts is not a map")
+		}
+		year2020Count, exists := yearCounts["2020"]
+		if exists {
+			count, ok := year2020Count.(float64)
+			if ok && int(count) != 0 {
+				t.Errorf("expected year 2020 count 0 after deletion, got %v", year2020Count)
+			}
+		}
+		year2021Count, ok := yearCounts["2021"].(float64)
+		if !ok || int(year2021Count) != 1 {
+			t.Errorf("expected year 2021 count 1 after deletion, got %v", yearCounts["2021"])
+		}
+	})
+
+	t.Run("価格統計が削除されたゲームを除外すること", func(t *testing.T) {
+		totalPrice, ok := result2["total_price"].(float64)
+		if !ok {
+			t.Fatal("total_price is not a number")
+		}
+		// game1(5000)が削除されたので、game2(6000)のみ
+		expected := 6000
+		if int(totalPrice) != expected {
+			t.Errorf("expected total_price %d after deletion, got %d", expected, int(totalPrice))
+		}
+
+		averagePrice, ok := result2["average_price"].(float64)
+		if !ok {
+			t.Fatal("average_price is not a number")
+		}
+		expectedAvg := 6000.0
+		if averagePrice != expectedAvg {
+			t.Errorf("expected average_price %.2f after deletion, got %.2f", expectedAvg, averagePrice)
 		}
 	})
 }

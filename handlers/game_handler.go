@@ -11,45 +11,129 @@ import (
 	"gorm.io/gorm"
 )
 
-// CreateGame ゲーム登録ハンドラー
+// CreateGameRequest ゲーム作成リクエスト構造体
+type CreateGameRequest struct {
+	Title       string `json:"title" binding:"required"`
+	ReleaseYear int    `json:"release_year" binding:"required"`
+	PublisherID uint   `json:"publisher_id" binding:"required"`
+	SeriesID    *uint  `json:"series_id,omitempty"`
+	PlatformIDs []uint `json:"platform_ids" binding:"required"`
+	GenreIDs    []uint `json:"genre_ids,omitempty"`
+	Price       int    `json:"price"`
+}
+
+// CreateGame ゲーム登録ハンドラー（正規化後）
 func CreateGame(c *gin.Context, db *gorm.DB) {
-	var game models.Game
+	var req CreateGameRequest
 
-	if err := c.ShouldBindJSON(&game); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := utils.ValidateGame(game); err != nil {
+	// Platformの取得
+	var platforms []models.Platform
+	if err := db.Where("id IN ?", req.PlatformIDs).Find(&platforms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get platforms"})
+		return
+	}
+	if len(platforms) != len(req.PlatformIDs) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "some platform_ids do not exist"})
+		return
+	}
+
+	// Genreの取得（空配列の場合はスキップ）
+	var genres []models.Genre
+	if len(req.GenreIDs) > 0 {
+		if err := db.Where("id IN ?", req.GenreIDs).Find(&genres).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get genres"})
+			return
+		}
+		if len(genres) != len(req.GenreIDs) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "some genre_ids do not exist"})
+			return
+		}
+	}
+
+	// Gameの作成
+	game := models.Game{
+		Title:       req.Title,
+		ReleaseYear: req.ReleaseYear,
+		PublisherID: req.PublisherID,
+		SeriesID:    req.SeriesID,
+		Platforms:   platforms,
+		Genres:      genres,
+		Price:       req.Price,
+	}
+
+	// バリデーション
+	if err := utils.ValidateGame(game, db); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	// データベースに保存
 	if err := db.Create(&game).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create game"})
+		return
+	}
+
+	// Preloadを使用して関連データを取得
+	if err := db.Preload("Publisher").Preload("Platforms").Preload("Series").Preload("Genres").
+		First(&game, game.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load game relations"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, game)
 }
 
-// GetGames ゲーム一覧取得ハンドラー
+// GetGames ゲーム一覧取得ハンドラー（正規化後）
 func GetGames(c *gin.Context, db *gorm.DB) {
 	var games []models.Game
 	query := db.Model(&models.Game{})
 
-	// フィルタリング
-	if platform := c.Query("platform"); platform != "" {
-		query = query.Where("platform = ?", platform)
+	// フィルタリング（正規化後の構造に対応）
+	hasJoin := false
+	if publisherID := c.Query("publisher_id"); publisherID != "" {
+		if id, err := strconv.ParseUint(publisherID, 10, 32); err == nil {
+			query = query.Where("publisher_id = ?", id)
+		}
 	}
-	if publisher := c.Query("publisher"); publisher != "" {
-		query = query.Where("publisher = ?", publisher)
+	if seriesID := c.Query("series_id"); seriesID != "" {
+		if id, err := strconv.ParseUint(seriesID, 10, 32); err == nil {
+			query = query.Where("series_id = ?", id)
+		}
 	}
-	if genre := c.Query("genre"); genre != "" {
-		query = query.Where("genre = ?", genre)
+	if platformIDs := c.QueryArray("platform_ids"); len(platformIDs) > 0 {
+		var ids []uint
+		for _, idStr := range platformIDs {
+			if id, err := strconv.ParseUint(idStr, 10, 32); err == nil {
+				ids = append(ids, uint(id))
+			}
+		}
+		if len(ids) > 0 {
+			query = query.Joins("JOIN game_platforms ON games.id = game_platforms.game_id").
+				Where("game_platforms.platform_id IN ?", ids)
+			hasJoin = true
+		}
 	}
-	if series := c.Query("series"); series != "" {
-		query = query.Where("series = ?", series)
+	if genreIDs := c.QueryArray("genre_ids"); len(genreIDs) > 0 {
+		var ids []uint
+		for _, idStr := range genreIDs {
+			if id, err := strconv.ParseUint(idStr, 10, 32); err == nil {
+				ids = append(ids, uint(id))
+			}
+		}
+		if len(ids) > 0 {
+			query = query.Joins("JOIN game_genres ON games.id = game_genres.game_id").
+				Where("game_genres.genre_id IN ?", ids)
+			hasJoin = true
+		}
+	}
+	// JOINがある場合はGROUP BYを適用
+	if hasJoin {
+		query = query.Group("games.id")
 	}
 	if minYear := c.Query("min_year"); minYear != "" {
 		query = query.Where("release_year >= ?", minYear)
@@ -68,6 +152,9 @@ func GetGames(c *gin.Context, db *gorm.DB) {
 		query = query.Order(sort + " DESC")
 	}
 
+	// Preloadを使用して関連データを取得
+	query = query.Preload("Publisher").Preload("Platforms").Preload("Series").Preload("Genres")
+
 	if err := query.Find(&games).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get games"})
 		return
@@ -76,7 +163,7 @@ func GetGames(c *gin.Context, db *gorm.DB) {
 	c.JSON(http.StatusOK, games)
 }
 
-// SearchGames ゲーム検索ハンドラー
+// SearchGames ゲーム検索ハンドラー（正規化後）
 func SearchGames(c *gin.Context, db *gorm.DB) {
 	var games []models.Game
 	query := db.Model(&models.Game{})
@@ -98,6 +185,9 @@ func SearchGames(c *gin.Context, db *gorm.DB) {
 		query = query.Order(sort + " DESC")
 	}
 
+	// Preloadを使用して関連データを取得
+	query = query.Preload("Publisher").Preload("Platforms").Preload("Series").Preload("Genres")
+
 	if err := query.Find(&games).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search games"})
 		return
@@ -106,7 +196,18 @@ func SearchGames(c *gin.Context, db *gorm.DB) {
 	c.JSON(http.StatusOK, games)
 }
 
-// UpdateGame ゲーム更新ハンドラー
+// UpdateGameRequest ゲーム更新リクエスト構造体
+type UpdateGameRequest struct {
+	Title       *string `json:"title,omitempty"`
+	ReleaseYear *int    `json:"release_year,omitempty"`
+	PublisherID *uint   `json:"publisher_id,omitempty"`
+	SeriesID    *uint   `json:"series_id,omitempty"`
+	PlatformIDs []uint  `json:"platform_ids,omitempty"`
+	GenreIDs    []uint  `json:"genre_ids,omitempty"`
+	Price       *int    `json:"price,omitempty"`
+}
+
+// UpdateGame ゲーム更新ハンドラー（正規化後）
 func UpdateGame(c *gin.Context, db *gorm.DB) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -115,7 +216,8 @@ func UpdateGame(c *gin.Context, db *gorm.DB) {
 	}
 
 	var game models.Game
-	if err := db.First(&game, id).Error; err != nil {
+	// 既存のGameを取得（PlatformsとGenresもPreload）
+	if err := db.Preload("Platforms").Preload("Genres").First(&game, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "game not found"})
 			return
@@ -124,68 +226,132 @@ func UpdateGame(c *gin.Context, db *gorm.DB) {
 		return
 	}
 
-	// 部分更新: 指定されたフィールドのみ更新
-	// JSONで送信されたフィールドのみを更新するため、mapで受け取る
+	// まず map でパースして、series_id キーが存在するかどうかを確認
 	var updateMap map[string]interface{}
 	if err := c.ShouldBindJSON(&updateMap); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 各フィールドが存在する場合のみ更新
+	// UpdateGameRequest に手動で変換
+	var req UpdateGameRequest
 	if title, ok := updateMap["title"].(string); ok {
-		if title == "" {
+		req.Title = &title
+	}
+	if releaseYear, ok := updateMap["release_year"].(float64); ok {
+		ry := int(releaseYear)
+		req.ReleaseYear = &ry
+	}
+	if publisherID, ok := updateMap["publisher_id"].(float64); ok {
+		pid := uint(publisherID)
+		req.PublisherID = &pid
+	}
+	if seriesID, ok := updateMap["series_id"]; ok {
+		if seriesID == nil {
+			// null の場合は nil ポインタを設定
+			req.SeriesID = nil
+		} else if sid, ok := seriesID.(float64); ok {
+			sidUint := uint(sid)
+			req.SeriesID = &sidUint
+		}
+	}
+	if price, ok := updateMap["price"].(float64); ok {
+		p := int(price)
+		req.Price = &p
+	}
+	if platformIDs, ok := updateMap["platform_ids"].([]interface{}); ok {
+		req.PlatformIDs = make([]uint, len(platformIDs))
+		for i, pid := range platformIDs {
+			if pidFloat, ok := pid.(float64); ok {
+				req.PlatformIDs[i] = uint(pidFloat)
+			}
+		}
+	}
+	if genreIDs, ok := updateMap["genre_ids"].([]interface{}); ok {
+		req.GenreIDs = make([]uint, len(genreIDs))
+		for i, gid := range genreIDs {
+			if gidFloat, ok := gid.(float64); ok {
+				req.GenreIDs[i] = uint(gidFloat)
+			}
+		}
+	}
+
+	// 各フィールドが存在する場合のみ更新
+	if req.Title != nil {
+		if *req.Title == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "title cannot be empty"})
 			return
 		}
-		game.Title = title
+		game.Title = *req.Title
 	}
-	if releaseYear, ok := updateMap["release_year"].(float64); ok {
-		game.ReleaseYear = int(releaseYear)
+	if req.ReleaseYear != nil {
+		game.ReleaseYear = *req.ReleaseYear
 	}
-	if publisher, ok := updateMap["publisher"].(string); ok {
-		if publisher == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "publisher cannot be empty"})
+	if req.PublisherID != nil {
+		game.PublisherID = *req.PublisherID
+	}
+	// series_id の処理：キーが存在する場合は更新（null の場合は nil に設定）
+	if _, exists := updateMap["series_id"]; exists {
+		game.SeriesID = req.SeriesID
+	}
+	if req.Price != nil {
+		game.Price = *req.Price
+	}
+
+	// PlatformIDsの更新
+	if req.PlatformIDs != nil {
+		var platforms []models.Platform
+		if err := db.Where("id IN ?", req.PlatformIDs).Find(&platforms).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get platforms"})
 			return
 		}
-		game.Publisher = publisher
-	}
-	if platform, ok := updateMap["platform"].(string); ok {
-		if platform == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "platform cannot be empty"})
+		if len(platforms) != len(req.PlatformIDs) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "some platform_ids do not exist"})
 			return
 		}
-		game.Platform = platform
+		game.Platforms = platforms
 	}
-	if series, ok := updateMap["series"].(string); ok {
-		game.Series = &series
-	} else if _, ok := updateMap["series"]; ok && updateMap["series"] == nil {
-		game.Series = nil
-	}
-	if genre, ok := updateMap["genre"].(string); ok {
-		game.Genre = &genre
-	} else if _, ok := updateMap["genre"]; ok && updateMap["genre"] == nil {
-		game.Genre = nil
-	}
-	if price, ok := updateMap["price"].(float64); ok {
-		game.Price = int(price)
+
+	// GenreIDsの更新
+	if req.GenreIDs != nil {
+		var genres []models.Genre
+		if len(req.GenreIDs) > 0 {
+			if err := db.Where("id IN ?", req.GenreIDs).Find(&genres).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get genres"})
+				return
+			}
+			if len(genres) != len(req.GenreIDs) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "some genre_ids do not exist"})
+				return
+			}
+		}
+		game.Genres = genres
 	}
 
 	// バリデーション
-	if err := utils.ValidateGame(game); err != nil {
+	if err := utils.ValidateGame(game, db); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	// データベースに保存（多対多リレーションも自動更新される）
 	if err := db.Save(&game).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update game"})
+		return
+	}
+
+	// Preloadを使用して関連データを取得
+	if err := db.Preload("Publisher").Preload("Platforms").Preload("Series").Preload("Genres").
+		First(&game, game.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load game relations"})
 		return
 	}
 
 	c.JSON(http.StatusOK, game)
 }
 
-// DeleteGame ゲーム削除ハンドラー
+// DeleteGame ゲーム削除ハンドラー（正規化後）
+// GORMが自動的に中間テーブル（game_platforms, game_genres）のレコードも削除する
 func DeleteGame(c *gin.Context, db *gorm.DB) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -203,6 +369,7 @@ func DeleteGame(c *gin.Context, db *gorm.DB) {
 		return
 	}
 
+	// GORMが自動的に中間テーブルのレコードも削除する
 	if err := db.Delete(&game).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete game"})
 		return
@@ -211,7 +378,7 @@ func DeleteGame(c *gin.Context, db *gorm.DB) {
 	c.Status(http.StatusNoContent)
 }
 
-// GetStatistics 統計情報取得ハンドラー
+// GetStatistics 統計情報取得ハンドラー（正規化後）
 func GetStatistics(c *gin.Context, db *gorm.DB) {
 	var totalCount int64
 	if err := db.Model(&models.Game{}).Count(&totalCount).Error; err != nil {
@@ -219,78 +386,82 @@ func GetStatistics(c *gin.Context, db *gorm.DB) {
 		return
 	}
 
-	// プラットフォーム別の集計
+	// プラットフォーム別の集計（多対多リレーション、削除されたゲームを除外）
 	type PlatformCount struct {
-		Platform string
-		Count    int64
+		Name  string
+		Count int64
 	}
 	var platformCounts []PlatformCount
-	if err := db.Model(&models.Game{}).
-		Select("platform, COUNT(*) as count").
-		Group("platform").
+	if err := db.Model(&models.Platform{}).
+		Select("platforms.name, COUNT(DISTINCT game_platforms.game_id) as count").
+		Joins("LEFT JOIN game_platforms ON platforms.id = game_platforms.platform_id").
+		Joins("INNER JOIN games ON game_platforms.game_id = games.id AND games.deleted_at IS NULL").
+		Group("platforms.id, platforms.name").
 		Scan(&platformCounts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get platform counts"})
 		return
 	}
 	platformCountsMap := make(map[string]int)
 	for _, pc := range platformCounts {
-		platformCountsMap[pc.Platform] = int(pc.Count)
+		platformCountsMap[pc.Name] = int(pc.Count)
 	}
 
-	// 発売会社別の集計
+	// 発売会社別の集計（1対多リレーション、削除されたゲームを除外）
 	type PublisherCount struct {
-		Publisher string
-		Count     int64
+		Name  string
+		Count int64
 	}
 	var publisherCounts []PublisherCount
-	if err := db.Model(&models.Game{}).
-		Select("publisher, COUNT(*) as count").
-		Group("publisher").
+	if err := db.Model(&models.Publisher{}).
+		Select("publishers.name, COUNT(games.id) as count").
+		Joins("LEFT JOIN games ON publishers.id = games.publisher_id AND games.deleted_at IS NULL").
+		Group("publishers.id, publishers.name").
 		Scan(&publisherCounts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get publisher counts"})
 		return
 	}
 	publisherCountsMap := make(map[string]int)
 	for _, pc := range publisherCounts {
-		publisherCountsMap[pc.Publisher] = int(pc.Count)
+		publisherCountsMap[pc.Name] = int(pc.Count)
 	}
 
-	// ジャンル別の集計（null除外）
+	// ジャンル別の集計（多対多リレーション、削除されたゲームを除外）
 	type GenreCount struct {
-		Genre string
+		Name  string
 		Count int64
 	}
 	var genreCounts []GenreCount
-	if err := db.Model(&models.Game{}).
-		Select("genre, COUNT(*) as count").
-		Where("genre IS NOT NULL AND genre != ''").
-		Group("genre").
+	if err := db.Model(&models.Genre{}).
+		Select("genres.name, COUNT(DISTINCT game_genres.game_id) as count").
+		Joins("LEFT JOIN game_genres ON genres.id = game_genres.genre_id").
+		Joins("INNER JOIN games ON game_genres.game_id = games.id AND games.deleted_at IS NULL").
+		Group("genres.id, genres.name").
 		Scan(&genreCounts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get genre counts"})
 		return
 	}
 	genreCountsMap := make(map[string]int)
 	for _, gc := range genreCounts {
-		genreCountsMap[gc.Genre] = int(gc.Count)
+		genreCountsMap[gc.Name] = int(gc.Count)
 	}
 
-	// シリーズ別の集計（null除外）
+	// シリーズ別の集計（1対多リレーション、削除されたゲームを除外）
 	type SeriesCount struct {
-		Series string
-		Count  int64
+		Name  string
+		Count int64
 	}
 	var seriesCounts []SeriesCount
-	if err := db.Model(&models.Game{}).
-		Select("series, COUNT(*) as count").
-		Where("series IS NOT NULL AND series != ''").
-		Group("series").
+	if err := db.Model(&models.Series{}).
+		Select("series.name, COUNT(games.id) as count").
+		Joins("LEFT JOIN games ON series.id = games.series_id AND games.deleted_at IS NULL").
+		Group("series.id, series.name").
 		Scan(&seriesCounts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get series counts"})
 		return
 	}
 	seriesCountsMap := make(map[string]int)
 	for _, sc := range seriesCounts {
-		seriesCountsMap[sc.Series] = int(sc.Count)
+		seriesCountsMap[sc.Name] = int(sc.Count)
 	}
 
 	// 発売年別の集計

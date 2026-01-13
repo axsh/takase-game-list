@@ -1,0 +1,146 @@
+### ヘルスチェック
+GET http://localhost:8080/health
+
+### ゲームAPI
+
+### ゲーム登録
+POST http://localhost:8080/games
+Content-Type: application/json
+
+{
+  "title": "The Legend of Zelda: Breath of the Wild",
+  "release_year": 2017,
+  "publisher_id": 1,
+  "platform_ids": [2],
+  "series_id": 1,
+  "genre_ids": [2, 3],
+  "price": 6980
+}
+
+### ゲーム登録（最小限の必須項目のみ）
+POST http://localhost:8080/games
+Content-Type: application/json
+
+{
+  "title": "Super Mario Odyssey",
+  "release_year": 2017,
+  "publisher_id": 1,
+  "platform_ids": [2]
+}
+
+### ゲーム一覧取得（全件）
+GET http://localhost:8080/games
+
+### ゲーム一覧取得（出版社でフィルタリング）
+GET http://localhost:8080/games?publisher_id=1
+
+### ゲーム一覧取得（プラットフォームでフィルタリング）
+GET http://localhost:8080/games?platform_ids=2&platform_ids=3
+
+### ゲーム一覧取得（シリーズでフィルタリング）
+GET http://localhost:8080/games?series_id=1
+
+### ゲーム一覧取得（ジャンルでフィルタリング）
+GET http://localhost:8080/games?genre_ids=2&genre_ids=3
+
+### ゲーム一覧取得（複合フィルタリング）
+GET http://localhost:8080/games?publisher_id=1&platform_ids=2&min_year=2017&max_year=2020
+
+### ゲーム一覧取得（ソート指定）
+GET http://localhost:8080/games?sort=release_year&order=asc
+
+### ゲーム更新（全項目）
+PUT http://localhost:8080/games/1
+Content-Type: application/json
+
+{
+  "title": "The Legend of Zelda: Breath of the Wild (Updated)",
+  "release_year": 2017,
+  "publisher_id": 1,
+  "series_id": 1,
+  "platform_ids": [2, 3],
+  "genre_ids": [2, 3, 4],
+  "price": 7980
+}
+
+### ゲーム更新（部分更新：タイトルのみ）
+PUT http://localhost:8080/games/1
+Content-Type: application/json
+
+{
+  "title": "Updated Game Title"
+}
+
+### ゲーム更新（部分更新：プラットフォームのみ）
+PUT http://localhost:8080/games/1
+Content-Type: application/json
+
+{
+  "platform_ids": [1, 2]
+}
+
+### ゲーム更新（シリーズを削除）
+PUT http://localhost:8080/games/4
+Content-Type: application/json
+
+{
+  "series_id": null
+}
+
+### ゲーム削除
+DELETE http://localhost:8080/games/1
+
+### ゲーム検索（キーワード検索）
+GET http://localhost:8080/games/search?q=Zelda
+
+### ゲーム検索（部分一致）
+GET http://localhost:8080/games/search?q=Mario
+
+### 統計情報取得
+GET http://localhost:8080/games/statistics
+
+### マスタデータAPI
+
+### 出版社一覧取得
+GET http://localhost:8080/publishers
+
+### 出版社登録
+POST http://localhost:8080/publishers
+Content-Type: application/json
+
+{
+  "name": "New Publisher"
+}
+
+### プラットフォーム一覧取得
+GET http://localhost:8080/platforms
+
+### プラットフォーム登録
+POST http://localhost:8080/platforms
+Content-Type: application/json
+
+{
+  "name": "New Platform"
+}
+
+### シリーズ一覧取得
+GET http://localhost:8080/series
+
+### シリーズ登録
+POST http://localhost:8080/series
+Content-Type: application/json
+
+{
+  "name": "Zelda"
+}
+
+### ジャンル一覧取得
+GET http://localhost:8080/genres
+
+### ジャンル登録
+POST http://localhost:8080/genres
+Content-Type: application/json
+
+{
+  "name": "New Genre"
+}
