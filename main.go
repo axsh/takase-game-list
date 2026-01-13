@@ -4,20 +4,50 @@ import (
 	"log"
 	"net/http"
 
+	"takase-game-list/db"
+	"takase-game-list/handlers"
+	"takase-game-list/middleware"
+
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
 func setupRouter(db *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+
+	// ミドルウェアの適用
+	router.Use(middleware.Logger())
+	router.Use(middleware.ErrorHandler())
+
+	// ヘルスチェック
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 			"db":     dbOK(db),
 		})
 	})
+
+	// ゲームAPI
+	router.POST("/games", func(c *gin.Context) {
+		handlers.CreateGame(c, db)
+	})
+	router.GET("/games", func(c *gin.Context) {
+		handlers.GetGames(c, db)
+	})
+	router.PUT("/games/:id", func(c *gin.Context) {
+		handlers.UpdateGame(c, db)
+	})
+	router.DELETE("/games/:id", func(c *gin.Context) {
+		handlers.DeleteGame(c, db)
+	})
+	router.GET("/games/search", func(c *gin.Context) {
+		handlers.SearchGames(c, db)
+	})
+	router.GET("/games/statistics", func(c *gin.Context) {
+		handlers.GetStatistics(c, db)
+	})
+
 	return router
 }
 
@@ -30,12 +60,18 @@ func dbOK(db *gorm.DB) bool {
 }
 
 func main() {
-	db, err := gorm.Open(sqlite.Open("game-list.db"), &gorm.Config{})
+	// データベース接続の初期化
+	database, err := db.InitDB("game-list.db")
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		log.Fatalf("failed to initialize database: %v", err)
 	}
 
-	router := setupRouter(db)
+	// マイグレーション実行
+	if err := db.Migrate(database); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
+	}
+
+	router := setupRouter(database)
 	if err := router.Run(":8080"); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}

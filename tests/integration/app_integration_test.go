@@ -17,7 +17,6 @@ func TestBinaryExists_Integration(t *testing.T) {
 		t.Fatalf("binary at %s is empty", binPath)
 	}
 }
-
 func projectRoot(t *testing.T) string {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)

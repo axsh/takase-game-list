@@ -49,7 +49,7 @@ Ensure-Bin -BinDir $BinDir
 
 try {
 	Write-Info "Building binary -> $BinaryPath"
-	Invoke-Go -GoArgs @("build", "-o", $BinaryPath, "./...")
+	Invoke-Go -GoArgs @("build", "-o", $BinaryPath, ".")
 	Write-Info "Build succeeded"
 
 	if ($Mode -eq "unit" -or $Mode -eq "all") {
